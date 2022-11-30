@@ -1,0 +1,38 @@
+{% extends 'main.html' %}
+
+{% block content %}
+
+<form action="/main/" method="post">
+    {% csrf_token %}
+
+    <p>Scam url:<br> <input name="first_url"/></p>
+    <p>Normal url:<br> <input name="second_url"/></p>
+    <input type="submit" value="Send"/>
+
+<h2>Похожесть текста: </h2>
+    {{ text_sim }}
+    {{ matrix_sim }}
+
+    <h2>Сравнение частей ссылки:</h2>
+    <ul>
+        {% for part in parts %}
+        <li>{{ part }}</li>
+        {% endfor %}
+    </ul>
+    <h2>Сравнение картинок:</h2>
+    {{ img }}
+{#{% if first_netloc != second_netloc %}#}
+{#    <h2>URL netlocs are different </h2>#}
+{#    <h2>Netloc of first url: </h2> {{ first_netloc }}#}
+{#    <h2>Netloc of second url: </h2> {{ second_netloc }}#}
+{##}
+{#{% elif first_netloc == second_netloc %}#}
+{#    <h2>{{ key }}</h2>#}
+{#    <h2>Netloc of first url: </h2> {{ first_netloc }}#}
+{#    <h2>Netloc of second url: </h2> {{ second_netloc }}#}
+{#{% endif %}#}
+
+
+</form>
+
+{% endblock %}
