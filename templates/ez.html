@@ -11,7 +11,8 @@
 
 <h2>Похожесть текста: </h2>
     {{ text_sim }}
-    {{ matrix_sim }}
+<h2>Похожесть HTML: </h2>
+    {{ html_sim }}
 
     <h2>Сравнение частей ссылки:</h2>
     <ul>
@@ -21,6 +22,7 @@
     </ul>
     <h2>Сравнение картинок:</h2>
     {{ img }}
+    {{ img1 }}
 {#{% if first_netloc != second_netloc %}#}
 {#    <h2>URL netlocs are different </h2>#}
 {#    <h2>Netloc of first url: </h2> {{ first_netloc }}#}

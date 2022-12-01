@@ -1,17 +1,6 @@
 from django.shortcuts import render
-from bs4 import BeautifulSoup
-import os
-from urllib.request import urlretrieve
-from urllib.request import urlopen
-from django.http import HttpResponse
 from urllib.parse import urlparse, parse_qsl, unquote_plus
-from django.template.response import TemplateResponse
 import numpy as np
-from math import *
-import os
-import requests
-from nltk.corpus import stopwords
-import h5py
 from collections import Counter
 import pandas as pd
 from math import sqrt
@@ -24,11 +13,120 @@ from keras.layers import Input
 from keras.models import Model
 from keras.layers import Conv2D, MaxPooling2D, UpSampling2D
 from keras.callbacks import ModelCheckpoint
+import requests
+from bs4 import BeautifulSoup
+from queue import Queue
+from urllib.request import urlopen
+from urllib.parse import urlparse, parse_qsl, unquote_plus
+
 
 
 punctuations_marks = ['.', ':', ',', '!', ';', '\'', '\"', '(', ')']
 
 
+def scrapping(url_page):
+    html_code_of_page = BeautifulSoup(urlopen(url_page).read(), 'html.parser')  # html код страницы
+    text_from_page = html_code_of_page.get_text()  # текст страницы
+    html_text_img_from_page = []
+
+    parts = {
+        'scheme': Url(url_page).parts.scheme,
+        'netloc': Url(url_page).parts.netloc,
+        'path': Url(url_page).parts.path,
+        'params': Url(url_page).parts.params,
+        'query': Url(url_page).parts.query,
+        'fragment': Url(url_page).parts.fragment}
+
+    list_extensions = ['raw', 'jpeg', 'jpg', 'tif', 'psd', 'bmp', 'gif', 'png', 'jp2', 'ico']
+    tags_with_pictures = html_code_of_page.find_all(src=True) + html_code_of_page.find_all(href=True)
+    list_attrs_src = []  # список картинок с страницы
+    for tag_with_picture in tags_with_pictures:
+        value_of_src_attribute = tag_with_picture.attrs.get("src")
+        if value_of_src_attribute is not None and \
+                value_of_src_attribute[value_of_src_attribute.rfind('.') + 1:] in list_extensions:
+            if value_of_src_attribute.startswith('http://www.') or value_of_src_attribute.startswith('https://www.'):
+                url_image = 'http://{}'.format(value_of_src_attribute[11:])
+            elif value_of_src_attribute.startswith('http://') or value_of_src_attribute.startswith('https://'):
+                url_image = value_of_src_attribute
+            elif value_of_src_attribute.startswith('//'):
+                url_image = 'https:{}'.format(value_of_src_attribute)
+            elif value_of_src_attribute.startswith('www.'):
+                url_image = 'http://{}'.format(value_of_src_attribute[4:])
+            else:
+                url_image = '{}{}'.format(parts['scheme'] + '://' + parts['netloc'], value_of_src_attribute)
+            list_attrs_src.append(url_image)
+        else:
+            value_of_href_attribute = tag_with_picture.attrs.get("href")
+            if value_of_href_attribute is not None and \
+                    value_of_href_attribute[value_of_href_attribute.rfind('.') + 1:] in list_extensions:
+                if value_of_href_attribute.startswith('http://www.') or value_of_href_attribute.startswith(
+                        'https://www.'):
+                    url_image = 'http://{}'.format(value_of_href_attribute[11:])
+                elif value_of_href_attribute.startswith('http://') or value_of_href_attribute.startswith('https://'):
+                    url_image = value_of_href_attribute
+                elif value_of_href_attribute.startswith('//'):
+                    url_image = 'https:{}'.format(value_of_href_attribute)
+                elif value_of_href_attribute.startswith('www.'):
+                    url_image = 'http://{}'.format(value_of_href_attribute[4:])
+                else:
+                    url_image = '{}{}'.format(parts['scheme'] + '://' + parts['netloc'], value_of_href_attribute)
+                list_attrs_src.append(url_image)
+
+    html_text_img_from_page.append(html_code_of_page)
+    html_text_img_from_page.append(text_from_page)
+    html_text_img_from_page.append(list_attrs_src)
+    if 'None' in html_text_img_from_page:
+        html_text_img_from_page.remove('None')
+    return html_text_img_from_page
+
+
+def crawler(domain_of_main_page, queue_of_all_pages):
+    page_without_protocol = domain_of_main_page.replace('https://', '')
+    all_pages_of_site = set()
+    filter_of_extra_links = {'#', 'search', 'javascript', 'system', 'default', 'None', 'viewBid', '.jpg', 'uploads'}
+    global links_to_all_pages
+    links_to_all_pages = []  # ссылки на страницы сайта
+    while True:
+
+        if queue_of_all_pages.qsize() == 0:
+            break
+
+        url_of_page = queue_of_all_pages.get()
+        all_pages_of_site.add(url_of_page)
+        response_of_call_of_page = requests.get(url_of_page)
+        response_of_call_of_page.raise_for_status()
+        links_to_all_pages.append(url_of_page)
+
+        html_of_page = BeautifulSoup(response_of_call_of_page.content, 'lxml')
+
+        for tag in html_of_page.find_all('a'):
+            value_of_attribute = tag.get('href')
+
+            if page_without_protocol not in str(value_of_attribute):
+                continue
+
+            if any(part_of_html in str(value_of_attribute) for part_of_html in filter_of_extra_links):
+                continue
+
+            queue_of_all_pages.put(value_of_attribute)
+
+
+def getting_data_from_site(domain_of_main_page):
+    html_text_img_of_all_pages = []  # данные со всех страниц сайта
+    queue_of_all_pages = Queue()
+    queue_of_all_pages.put(domain_of_main_page)
+
+    try:
+        crawler(domain_of_main_page, queue_of_all_pages)
+    except requests.HTTPError as error:
+        error
+
+    for new_link in links_to_all_pages:
+        html_text_img_of_all_pages.append(scrapping(new_link))
+
+    return html_text_img_of_all_pages
+
+#------------------------------------------------------------------------------------------------------------
 # Функция генерации автокодировщика
 def create_deep_conv_ae():
     input_img = Input(shape=(32, 32, 3))
@@ -272,9 +370,6 @@ class Url(object):
         return hash(self.parts)
 
 
-
-
-
 def index(request):
     return render(request, 'ez.html')
 
@@ -283,11 +378,23 @@ def main(request):
     first_url = request.POST.get("first_url")
     second_url = request.POST.get("second_url")
 
-    texts = [first_url, second_url]
-    sim_matrix = get_text_similarity(texts, method="cosine")
+    html_text_img_of_all_pages1 = getting_data_from_site(first_url)
+    html_text_img_of_all_pages2 = getting_data_from_site(second_url)
+
+
+
+
+    html1, text1, img1 = html_text_img_of_all_pages1[0][0], html_text_img_of_all_pages1[0][1], html_text_img_of_all_pages1[0][2]
+    html2, text2, img2 = html_text_img_of_all_pages2[0][0], html_text_img_of_all_pages2[0][1], html_text_img_of_all_pages2[0][2]
 
     result_img = compare_images("/home/ermakov/PycharmProjects/AntiScamSait/templates/img1.jpg",
                                 "/home/ermakov/PycharmProjects/AntiScamSait/templates/img2.jpg")
+
+    texts = [text1, text2]
+    sim_matrix_text = get_text_similarity(texts, method="cosine")
+
+    res_html = [str(html1) , str(html2)]
+    sim_matrix_html = get_text_similarity(res_html, method="cosine")
 
     parts1 = {
         'scheme': Url(first_url).parts.scheme,
@@ -313,7 +420,7 @@ def main(request):
         else:
             arr += [str(i) + " different " + str(parts1[i]) + " " + str(parts2[i])]
 
-    data = {"text_sim": sim_matrix[0][1], "matrix_sim": sim_matrix, "parts": arr, "img": result_img}
+    data = {"text_sim": sim_matrix_text[0][1], "html_sim" : sim_matrix_html[0][1], "parts": arr, "img": result_img, } # "img1": img1
 
     return render(request, "ez.html", context=data)
 
@@ -321,5 +428,3 @@ def main(request):
 
 # https://github.com/
 # https://openedu.ru/
-
-
