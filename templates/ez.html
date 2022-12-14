@@ -2,6 +2,8 @@
 
 {% block content %}
 
+{% load static %}
+
 <form action="/main/" method="post">
     {% csrf_token %}
 
@@ -21,18 +23,10 @@
         {% endfor %}
     </ul>
     <h2>Сравнение картинок:</h2>
-    {{ img }}
-    {{ img1 }}
-{#{% if first_netloc != second_netloc %}#}
-{#    <h2>URL netlocs are different </h2>#}
-{#    <h2>Netloc of first url: </h2> {{ first_netloc }}#}
-{#    <h2>Netloc of second url: </h2> {{ second_netloc }}#}
-{##}
-{#{% elif first_netloc == second_netloc %}#}
-{#    <h2>{{ key }}</h2>#}
-{#    <h2>Netloc of first url: </h2> {{ first_netloc }}#}
-{#    <h2>Netloc of second url: </h2> {{ second_netloc }}#}
-{#{% endif %}#}
+
+        {% for el in img %}
+        <li>{{ el }}</li>
+        {% endfor %}
 
 
 </form>

@@ -26,6 +26,8 @@ SECRET_KEY = 'django-insecure-gmug!!!)@n6ap&ha)@je#40_jr755eh86*xg&$zgu=2qd+=&oz
 DEBUG = True
 
 ALLOWED_HOSTS = []
+CSRF_TRUSTED_ORIGINS = ['https://*.domain.com']
+
 
 
 # Application definition
@@ -55,7 +57,7 @@ ROOT_URLCONF = 'AntiScamSait.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [BASE_DIR / 'templates']
+        'DIRS': [BASE_DIR / 'app/../templates']
         ,
         'APP_DIRS': True,
         'OPTIONS': {

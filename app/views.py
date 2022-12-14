@@ -1,11 +1,20 @@
+from django.http import HttpResponse
 from django.shortcuts import render
-from urllib.parse import urlparse, parse_qsl, unquote_plus
 import numpy as np
 from collections import Counter
+from math import sqrt
+import requests
+from bs4 import BeautifulSoup
+from queue import Queue
+from urllib.request import urlopen
+from urllib.parse import urlparse, parse_qsl, unquote_plus
 import pandas as pd
 from math import sqrt
+from django.views.decorators.csrf import requires_csrf_token
+from django.views.decorators.csrf import csrf_exempt
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
+
 from keras.api.keras.preprocessing import image
 from keras.applications.convnext import preprocess_input
 from keras.datasets import cifar10
@@ -13,11 +22,8 @@ from keras.layers import Input
 from keras.models import Model
 from keras.layers import Conv2D, MaxPooling2D, UpSampling2D
 from keras.callbacks import ModelCheckpoint
-import requests
-from bs4 import BeautifulSoup
-from queue import Queue
-from urllib.request import urlopen
-from urllib.parse import urlparse, parse_qsl, unquote_plus
+from PIL import Image
+
 
 
 
@@ -86,7 +92,7 @@ def crawler(domain_of_main_page, queue_of_all_pages):
     filter_of_extra_links = {'#', 'search', 'javascript', 'system', 'default', 'None', 'viewBid', '.jpg', 'uploads'}
     global links_to_all_pages
     links_to_all_pages = []  # ссылки на страницы сайта
-    while True:
+    while len(links_to_all_pages) < 10:
 
         if queue_of_all_pages.qsize() == 0:
             break
@@ -111,6 +117,7 @@ def crawler(domain_of_main_page, queue_of_all_pages):
             queue_of_all_pages.put(value_of_attribute)
 
 
+@csrf_exempt
 def getting_data_from_site(domain_of_main_page):
     html_text_img_of_all_pages = []  # данные со всех страниц сайта
     queue_of_all_pages = Queue()
@@ -127,6 +134,7 @@ def getting_data_from_site(domain_of_main_page):
     return html_text_img_of_all_pages
 
 #------------------------------------------------------------------------------------------------------------
+
 # Функция генерации автокодировщика
 def create_deep_conv_ae():
     input_img = Input(shape=(32, 32, 3))
@@ -169,12 +177,12 @@ d_autoencoder.load_weights("/home/ermakov/PycharmProjects/AntiScamSait/venv/weig
 
 
 # Функция подготовки изображения для обработки
-def get_img(path):
-    img = image.load_img(path, target_size=(32, 32))
+def get_img(img):
     x = image.img_to_array(img)
-    x = np.expand_dims(x, axis=0)
-    x = preprocess_input(x)
-    return x
+    new_img = np.reshape(x, (32, 32, 3))
+    new_img = np.expand_dims(new_img, axis=0)
+    new_img = preprocess_input(new_img)
+    return new_img
 
 
 def start_training(name_of_weights_file):
@@ -213,7 +221,6 @@ def get_pca_metrics(img):
     pca = PCA(n_components=2)
     principal_comps = pca.fit_transform(x)
     principal_df = pd.DataFrame(data=principal_comps, columns=['1', '2'])
-
     return principal_df
 
 
@@ -232,9 +239,11 @@ def get_vector(dictionary, index):
     return [x, y]
 
 
-def compare_images(img1path, img2path):
-    image1 = get_img(str(img1path))
-    image2 = get_img(str(img2path))
+def compare_images(img1, img2):
+    metrica = 0.95
+
+    image1 = get_img(img1)
+    image2 = get_img(img2)
 
     encoded_img1 = d_encoder.predict(image1)
     encoded_img2 = d_encoder.predict(image2)
@@ -246,13 +255,53 @@ def compare_images(img1path, img2path):
 
     # Среднее арифмитическое 4 метрик
     for i in range(4):
-        comparer += abs(get_cosine_similarity(get_vector(arr, i), get_vector(arr2, i)))
-    return str("Изображения похожи на " + str(comparer / 4 * 100) + " %")
+        first_vector = get_vector(arr, i)
+        second_vector = get_vector(arr2, i)
+        res = abs(get_cosine_similarity(first_vector, second_vector))
+        comparer += res
+    return (comparer / 4) >= metrica
 
 
+def open_img(path):
+    img = Image.open(urlopen(path)).convert("RGB")
+    # Split into 3 channels
+    r, g, b = img.split()
+
+    # Increase Reds
+    r = r.point(lambda i: i * 1.2)
+
+    # Decrease Greens
+    g = g.point(lambda i: i * 0.9)
+
+    # Recombine back to RGB image
+    result = Image.merge('RGB', (r, g, b))
+    return result.resize((32, 32))
 
 
+def get_picture_result(arr1, arr2):
+    result = []
+    if len(arr1) == len(arr2):
+        for i in range(len(arr1)):
+            image1 = open_img(arr1[i])
+            image2 = open_img(arr2[i])
+            if compare_images(image1, image2):
+                result += ["Изображения под номерами: " + str(i+1) + " - " + "ПОХОЖИ"]
+            else:
+                result += ["Изображения под номерами: " + str(i+1) + " - " + "НЕ ПОХОЖИ"]
+        return result
+    else:
+        arr_length = min(len(arr1), len(arr2))
+        for i in range(arr_length):
+            image1 = open_img(arr1[i])
+            image2 = open_img(arr2[i])
+            if compare_images(image1, image2):
+                result += ["Изображения под номерами: " + str(i+1) + " - " + "ПОХОЖИ"]
+            else:
+                result += ["Изображения под номерами: " + str(i+1) + " - " + "НЕ ПОХОЖИ"]
+        return result
 
+
+#------------------------------------------------------------------------------------------------------------
 def tokenize_sentences(text, stop_char="."):
     return [x.lower() + ' ' + stop_char + '' for x in text.split(stop_char) if x != ""]
 
@@ -381,20 +430,21 @@ def main(request):
     html_text_img_of_all_pages1 = getting_data_from_site(first_url)
     html_text_img_of_all_pages2 = getting_data_from_site(second_url)
 
+    if len(html_text_img_of_all_pages1) < 2 or len(html_text_img_of_all_pages2) < 2 :
+        return render(request, "error.html")
+    else :
+        html1, text1, img1 = html_text_img_of_all_pages1[0][0], html_text_img_of_all_pages1[0][1], html_text_img_of_all_pages1[0][2]
+        html2, text2, img2 = html_text_img_of_all_pages2[0][0], html_text_img_of_all_pages2[0][1], html_text_img_of_all_pages2[0][2]
 
-
-
-    html1, text1, img1 = html_text_img_of_all_pages1[0][0], html_text_img_of_all_pages1[0][1], html_text_img_of_all_pages1[0][2]
-    html2, text2, img2 = html_text_img_of_all_pages2[0][0], html_text_img_of_all_pages2[0][1], html_text_img_of_all_pages2[0][2]
-
-    result_img = compare_images("/home/ermakov/PycharmProjects/AntiScamSait/templates/img1.jpg",
-                                "/home/ermakov/PycharmProjects/AntiScamSait/templates/img2.jpg")
 
     texts = [text1, text2]
     sim_matrix_text = get_text_similarity(texts, method="cosine")
 
     res_html = [str(html1) , str(html2)]
     sim_matrix_html = get_text_similarity(res_html, method="cosine")
+
+    res_img = get_picture_result(img1, img2)
+
 
     parts1 = {
         'scheme': Url(first_url).parts.scheme,
@@ -420,7 +470,7 @@ def main(request):
         else:
             arr += [str(i) + " different " + str(parts1[i]) + " " + str(parts2[i])]
 
-    data = {"text_sim": sim_matrix_text[0][1], "html_sim" : sim_matrix_html[0][1], "parts": arr, "img": result_img, } # "img1": img1
+    data = {"text_sim": sim_matrix_text[0][1], "html_sim" : sim_matrix_html[0][1], "parts": arr, "img": res_img}
 
     return render(request, "ez.html", context=data)
 
@@ -428,3 +478,4 @@ def main(request):
 
 # https://github.com/
 # https://openedu.ru/
+# https://www.hellomonday.com/
