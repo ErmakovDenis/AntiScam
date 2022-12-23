@@ -24,7 +24,7 @@ from keras.layers import Conv2D, MaxPooling2D, UpSampling2D
 from keras.callbacks import ModelCheckpoint
 from PIL import Image
 
-
+import urlextract
 
 
 punctuations_marks = ['.', ':', ',', '!', ';', '\'', '\"', '(', ')']
@@ -158,7 +158,7 @@ def create_deep_conv_ae():
     x = UpSampling2D((2, 2))(x)
 
     x = Conv2D(32, (3, 3), activation='relu', padding='same')(x)
-    x = UpSampling2D((2, 2))(x)
+    x = UpSampling2D((4, 4))(x)
 
     x = Conv2D(64, (3, 3), activation='relu', padding='same')(x)
     decoded = Conv2D(3, (3, 3), padding='same')(x)
@@ -173,7 +173,7 @@ def create_deep_conv_ae():
 # Генерируем модели
 d_encoder, d_decoder, d_autoencoder = create_deep_conv_ae()
 d_autoencoder.compile(optimizer='adam', loss='binary_crossentropy', metrics='acc')
-d_autoencoder.load_weights("/home/ermakov/PycharmProjects/AntiScamSait/venv/weights(cifar10).hdf5")  # Загрузка предварительно обученных весов
+d_autoencoder.load_weights("/home/ermakov/PycharmProjects/AntiScamSait/venv/cifar100_weightsnew.hdf5")
 
 
 # Функция подготовки изображения для обработки
@@ -185,23 +185,6 @@ def get_img(img):
     return new_img
 
 
-def start_training(name_of_weights_file):
-    # Загружаем dataset cifar10
-    (x_train, y_train), (x_test, y_test) = cifar10.load_data()
-    x_train = x_train.astype('float32') / 255.
-    x_test = x_test.astype('float32') / 255.
-    x_train = np.reshape(x_train, (len(x_train), 32, 32, 3))
-    x_test = np.reshape(x_test, (len(x_test), 32, 32, 3))
-
-    weights_file = str(name_of_weights_file)  # Имя файла в который сохранются веса
-
-    # Чекпоинты для сохранения в процессе обучения
-    checkpoint = ModelCheckpoint(weights_file, monitor='acc', mode='max', save_best_only=True, verbose=1)
-
-    d_autoencoder.fit(x_train, x_train, epochs=5, batch_size=128, callbacks=[checkpoint], shuffle=True,
-                      validation_data=(x_test, x_test))
-
-
 def get_pca_metrics(img):
     features = [str(x + 1) for x in range(8)]  # Названия колонок для датафрейма
 
@@ -210,10 +193,10 @@ def get_pca_metrics(img):
     for i in range(len(img[0])):
         for e in img[0][i]:
             array += [[e[j] for j in range(len(e))]]
+    new_arr = [[el for el in array[0]], [el for el in array[1]], [el for el in array[2]], [el for el in array[3]]]
 
     # Создание pandas dataframe
-    result = [[el for el in array[0]], [el for el in array[1]], [el for el in array[2]], [el for el in array[3]]]
-    df = pd.DataFrame(data=result, columns=list('12345678'))
+    df = pd.DataFrame(data=new_arr, columns=list('12345678'))
     x = df.loc[:, features].values
     x = StandardScaler().fit_transform(x)
 
@@ -222,6 +205,17 @@ def get_pca_metrics(img):
     principal_comps = pca.fit_transform(x)
     principal_df = pd.DataFrame(data=principal_comps, columns=['1', '2'])
     return principal_df
+
+
+def square_rooted(num):
+    return round(sqrt(sum([a * a for a in num])), 3)
+
+
+# Функция сравнения косинусного расстояния между 2 векторами
+def get_cosine_similarity(x, y):
+    numerator = sum(a * b for a, b in zip(x, y))
+    denominator = square_rooted(x) * square_rooted(y)
+    return round(numerator / float(denominator), 3)
 
 
 # Получение вектора из pd dataframe
@@ -239,9 +233,8 @@ def get_vector(dictionary, index):
     return [x, y]
 
 
+# Функция для получения коэфицента похожести 2 изображений
 def compare_images(img1, img2):
-    metrica = 0.95
-
     image1 = get_img(img1)
     image2 = get_img(img2)
 
@@ -252,53 +245,79 @@ def compare_images(img1, img2):
     arr2 = get_pca_metrics(encoded_img2).to_dict()
 
     comparer = 0
-
     # Среднее арифмитическое 4 метрик
     for i in range(4):
         first_vector = get_vector(arr, i)
         second_vector = get_vector(arr2, i)
-        res = abs(get_cosine_similarity(first_vector, second_vector))
-        comparer += res
-    return (comparer / 4) >= metrica
+        comparer += abs(get_cosine_similarity(first_vector, second_vector))
+    return comparer / 4  # >= metrica
 
 
-def open_img(path):
-    img = Image.open(urlopen(path)).convert("RGB")
-    # Split into 3 channels
-    r, g, b = img.split()
+# Функция открытия изображения по ссылке или пути в файловой системе
+def open_img(url_path):
+    extractor = urlextract.URLExtract()
+    urls = extractor.find_urls(url_path)
 
-    # Increase Reds
-    r = r.point(lambda i: i * 1.2)
-
-    # Decrease Greens
-    g = g.point(lambda i: i * 0.9)
-
-    # Recombine back to RGB image
-    result = Image.merge('RGB', (r, g, b))
-    return result.resize((32, 32))
-
-
-def get_picture_result(arr1, arr2):
-    result = []
-    if len(arr1) == len(arr2):
-        for i in range(len(arr1)):
-            image1 = open_img(arr1[i])
-            image2 = open_img(arr2[i])
-            if compare_images(image1, image2):
-                result += ["Изображения под номерами: " + str(i+1) + " - " + "ПОХОЖИ"]
-            else:
-                result += ["Изображения под номерами: " + str(i+1) + " - " + "НЕ ПОХОЖИ"]
-        return result
+    if len(urls) == 0:
+        img = Image.open(url_path)
     else:
-        arr_length = min(len(arr1), len(arr2))
-        for i in range(arr_length):
-            image1 = open_img(arr1[i])
-            image2 = open_img(arr2[i])
-            if compare_images(image1, image2):
-                result += ["Изображения под номерами: " + str(i+1) + " - " + "ПОХОЖИ"]
-            else:
-                result += ["Изображения под номерами: " + str(i+1) + " - " + "НЕ ПОХОЖИ"]
-        return result
+        img = Image.open(urlopen(url_path)).convert("RGB")
+
+    r, g, b = img.split()
+    r = r.point(lambda i: i * 1.2)
+    g = g.point(lambda i: i * 0.9)
+    res_img = Image.merge('RGB', (r, g, b))
+
+    return res_img.resize((32, 32))
+
+
+# Функция для нахождения ключа по значению в словаре
+def get_key(d, value):
+    for k, v in d.items():
+        if v == value:
+            return k
+
+
+# Функция для нахождения максимально похожего изображения из 2 массива
+def get_picture_similarity(pic_arr):
+    result_dict = []
+    for url_dict in pic_arr:
+        maximum = max(url_dict.values())
+        best_sim = get_key(url_dict, maximum)
+        result_dict += [best_sim + ":  --- " + str(maximum)]
+
+    return result_dict
+
+
+def get_similarities(img_arr1, img_arr2):
+    container = []
+    for url1 in img_arr1:
+        img1 = open_img(url1)
+        pred = {}
+        for url2 in img_arr2:
+            img2 = open_img(url2)
+            pred[str(url1) + " - " + str(url2)] = compare_images(img1, img2)
+        container.append(pred)
+    return container
+
+
+# Функция для сортировки словаря (прямая, обратная)
+def sort_dict(dictionary, param):
+    sorted_dict = {}
+    sorted_values = sorted(dictionary.values())
+
+    for i in sorted_values:
+        for k in dictionary.keys():
+            if dictionary[k] == i:
+                sorted_dict[k] = dictionary[k]
+
+    if param == "direct":
+        return sorted_dict
+    elif param == "reverse":
+        copied_dict = {}
+        for key in reversed(sorted_dict.copy()):
+            copied_dict[key] = sorted_dict.get(key)
+        return copied_dict
 
 
 #------------------------------------------------------------------------------------------------------------
@@ -430,21 +449,35 @@ def main(request):
     html_text_img_of_all_pages1 = getting_data_from_site(first_url)
     html_text_img_of_all_pages2 = getting_data_from_site(second_url)
 
-    if len(html_text_img_of_all_pages1) < 2 or len(html_text_img_of_all_pages2) < 2 :
-        return render(request, "error.html")
-    else :
-        html1, text1, img1 = html_text_img_of_all_pages1[0][0], html_text_img_of_all_pages1[0][1], html_text_img_of_all_pages1[0][2]
-        html2, text2, img2 = html_text_img_of_all_pages2[0][0], html_text_img_of_all_pages2[0][1], html_text_img_of_all_pages2[0][2]
+    # if len(html_text_img_of_all_pages1) < 2 or len(html_text_img_of_all_pages2) < 2:
+    #     return render(request, "error.html")
+    # else :
+
+    html1, text1, img1 = html_text_img_of_all_pages1[0][0], html_text_img_of_all_pages1[0][1], \
+                             html_text_img_of_all_pages1[0][2]
+    html2, text2, img2 = html_text_img_of_all_pages2[0][0], html_text_img_of_all_pages2[0][1], \
+                             html_text_img_of_all_pages2[0][2]
+
 
 
     texts = [text1, text2]
-    sim_matrix_text = get_text_similarity(texts, method="cosine")
+    if len(texts) <= 1 :
+        sim_matrix_text = [["нет текста", "нет текста"], ["нет текста", "нет текста"]]
+    else:
+        sim_matrix_text = get_text_similarity(texts, method="cosine")
 
     res_html = [str(html1) , str(html2)]
-    sim_matrix_html = get_text_similarity(res_html, method="cosine")
+    if len(res_html) <= 1:
+        sim_matrix_html = [["нет хтмл", "нет хтмл"], ["нет хтмл", "нет хтмл"]]
+    else:
+        sim_matrix_html = get_text_similarity(res_html, method="cosine")
 
-    res_img = get_picture_result(img1, img2)
+    res = get_similarities(img1, img2)
+    res_img = get_picture_similarity(res)
 
+
+    if len(res_img) <= 0:
+        res_img = "Нет картинок на одном из сайтов"
 
     parts1 = {
         'scheme': Url(first_url).parts.scheme,
@@ -479,3 +512,4 @@ def main(request):
 # https://github.com/
 # https://openedu.ru/
 # https://www.hellomonday.com/
+
